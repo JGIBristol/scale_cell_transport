@@ -204,7 +204,10 @@ class PositionEncodingSine(nn.Module):
 class LocalFeatureTransformer(nn.Module):
     """A Local Feature Transformer (LoFTR) module."""
 
-    def __init__(self, d_model, layer_names, attention_type):
+    def __init__(self, *, d_model, nhead, layer_names, attention_type):
+        """
+        nhead is unused, I think, but kept for compatibility with the original code
+        """
         super().__init__()
 
         self.d_model = d_model
