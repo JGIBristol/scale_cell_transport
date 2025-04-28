@@ -21,6 +21,18 @@ def rdsf_path() -> pathlib.Path:
     return pathlib.Path(util.config()["rdsf_dir"])
 
 
+def model_path() -> pathlib.Path:
+    """
+    Path to the model directory
+    """
+    return (
+        pathlib.Path(__file__).parents[2]
+        / "src"
+        / "rotir"
+        / "Fishscale_registration_11454726_40000.pth"
+    )
+
+
 def incucyte_video_dir_1() -> pathlib.Path:
     """
     Path to directory containing some scale videos

@@ -33,6 +33,7 @@ class LinearAttention(nn.Module):
     Linear attention scales linearly instead of quadratically with the sequence length,
     so it's useful for high-resolution images/feature maps.
     """
+
     def __init__(self, eps=1e-6):
         super().__init__()
         self.feature_map = elu_feature_map
@@ -73,6 +74,7 @@ class FullAttention(nn.Module):
     Full attention scales quadratically with the sequence length, so it's useful for
     low-resolution images/feature maps.
     """
+
     def __init__(self, use_dropout=False, attention_dropout=0.1):
         super().__init__()
         self.use_dropout = use_dropout
@@ -112,6 +114,7 @@ class LoFTREncoderLayer(nn.Module):
     """
     A single layer of the Local Feature Transformer (LoFTR) module.
     """
+
     def __init__(self, d_model, attention="linear"):
         super().__init__()
 
@@ -207,10 +210,7 @@ class LocalFeatureTransformer(nn.Module):
         self.d_model = d_model
         self.layer_names = layer_names
         self.layers = nn.ModuleList(
-            [
-                LoFTREncoderLayer(d_model, attention_type)
-                for _ in self.layer_names
-            ]
+            [LoFTREncoderLayer(d_model, attention_type) for _ in self.layer_names]
         )
         self._reset_parameters()
 
@@ -257,6 +257,7 @@ class Block(torch.nn.Module):
     """
     A block of convolutional layers with optional downsampling and residual connections.
     """
+
     def __init__(self, in_type, out_type, down=False, double=False):
         super().__init__()
         self.frame = e2nn.SequentialModule(
@@ -309,6 +310,7 @@ class FeatureExtraction(torch.nn.Module):
     We use e2cnn for rotational equivariance - the network maintains
     the same output irrespective of the input rotation, which is what we need for registration.
     """
+
     def __init__(
         self,
         in_channel,

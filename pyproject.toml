@@ -15,13 +15,13 @@ dependencies = [
     "ipywidgets>=8.1.6",
     "jupyter>=1.1.1",
     "matplotlib>=3.9.4",
-    "numpy>=2.0.2",
+    "numpy==1.26.0",
     "opencv-python>=4.11.0.86",
     "pillow>=11.2.1",
     "pylint>=3.3.6",
     "pyyaml>=6.0.2",
-    "torch>=2.7.0",
-    "torchvision>=0.22.0",
+    "torch==1.8.1",
+    "torchvision==0.9.1",
     "tqdm>=4.67.1",
 ]
 
