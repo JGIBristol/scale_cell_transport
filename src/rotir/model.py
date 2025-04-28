@@ -12,17 +12,27 @@ and added some extra documentation, type hints, etc.
 """
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 from einops.einops import rearrange
 from e2cnn import gspaces, nn as e2nn
 
 
+# ====
+# Local Feature Transformer (LoFTR)
+# ====
 def elu_feature_map(x):
+    """
+    ELU feature map for linear attention; +1 ensures positive values for the attention
+    """
     return torch.nn.functional.elu(x) + 1
 
 
 class LinearAttention(nn.Module):
+    """
+    Linear attention scales linearly instead of quadratically with the sequence length,
+    so it's useful for high-resolution images/feature maps.
+    """
     def __init__(self, eps=1e-6):
         super().__init__()
         self.feature_map = elu_feature_map
@@ -39,26 +49,30 @@ class LinearAttention(nn.Module):
         Returns:
             queried_values: (N, L, H, D)
         """
-        Q = self.feature_map(queries)
-        K = self.feature_map(keys)
+        q = self.feature_map(queries)
+        k = self.feature_map(keys)
 
         # set padded position to zero
         if q_mask is not None:
-            Q = Q * q_mask[:, :, None, None]
+            q = q * q_mask[:, :, None, None]
         if kv_mask is not None:
-            K = K * kv_mask[:, :, None, None]
+            k = k * kv_mask[:, :, None, None]
             values = values * kv_mask[:, :, None, None]
 
         v_length = values.size(1)
         values = values / v_length  # prevent fp16 overflow
-        KV = torch.einsum("nshd,nshv->nhdv", K, values)  # (S,D)' @ S,V
-        Z = 1 / (torch.einsum("nlhd,nhd->nlh", Q, K.sum(dim=1)) + self.eps)
-        queried_values = torch.einsum("nlhd,nhdv,nlh->nlhv", Q, KV, Z) * v_length
+        k_v = torch.einsum("nshd,nshv->nhdv", k, values)  # (S,D)' @ S,V
+        z = 1 / (torch.einsum("nlhd,nhd->nlh", q, k.sum(dim=1)) + self.eps)
+        queried_values = torch.einsum("nlhd,nhdv,nlh->nlhv", q, k_v, z) * v_length
 
         return queried_values.contiguous()
 
 
 class FullAttention(nn.Module):
+    """
+    Full attention scales quadratically with the sequence length, so it's useful for
+    low-resolution images/feature maps.
+    """
     def __init__(self, use_dropout=False, attention_dropout=0.1):
         super().__init__()
         self.use_dropout = use_dropout
@@ -77,29 +91,29 @@ class FullAttention(nn.Module):
         """
 
         # Compute the unnormalized attention and apply the masks
-        QK = torch.einsum("nlhd,nshd->nlsh", queries, keys)
+        q_k = torch.einsum("nlhd,nshd->nlsh", queries, keys)
         if kv_mask is not None:
-            QK.masked_fill_(
+            q_k.masked_fill_(
                 ~(q_mask[:, :, None, None] * kv_mask[:, None, :, None]), float("-inf")
             )
 
         # Compute the attention and the weighted average
         softmax_temp = 1.0 / queries.size(3) ** 0.5  # sqrt(D)
-        A = torch.softmax(softmax_temp * QK, dim=2)
+        att = torch.softmax(softmax_temp * q_k, dim=2)
         if self.use_dropout:
-            A = self.dropout(A)
+            att = self.dropout(att)
 
-        queried_values = torch.einsum("nlsh,nshd->nlhd", A, values)
+        queried_values = torch.einsum("nlsh,nshd->nlhd", att, values)
 
         return queried_values.contiguous()
 
 
 class LoFTREncoderLayer(nn.Module):
-    def __init__(self, d_model, nhead, attention="linear"):
-        super(LoFTREncoderLayer, self).__init__()
-
-        # self.dim = d_model // nhead
-        # self.nhead = nhead
+    """
+    A single layer of the Local Feature Transformer (LoFTR) module.
+    """
+    def __init__(self, d_model, attention="linear"):
+        super().__init__()
 
         # multi-head attention
         self.q_proj = nn.Linear(d_model, d_model, bias=False)
@@ -127,21 +141,16 @@ class LoFTREncoderLayer(nn.Module):
             x_mask (torch.Tensor): [N, L] (optional)
             source_mask (torch.Tensor): [N, S] (optional)
         """
-        # bs = x.size(0)
         query, key, value = x, source, source
 
         # multi-head attention
-        query = self.q_proj(
-            query
-        )  # .view(bs, -1, self.nhead, self.dim)  # [N, L, E, C]
-        key = self.k_proj(key)  # .view(bs, -1, self.nhead, self.dim)  # [N, S, E, C]
-        value = self.v_proj(value)  # .view(bs, -1, self.nhead, self.dim)
+        query = self.q_proj(query)
+        key = self.k_proj(key)
+        value = self.v_proj(value)
         message = self.attention(
             query, key, value, q_mask=x_mask, kv_mask=source_mask
         )  # [N, L, E, C]
-        message = self.merge(
-            message
-        )  # .view(bs, -1, self.nhead*self.dim))  # [N, L, E, C]
+        message = self.merge(message)
         message = self.norm1(message)
 
         # feed-forward network
@@ -192,18 +201,14 @@ class PositionEncodingSine(nn.Module):
 class LocalFeatureTransformer(nn.Module):
     """A Local Feature Transformer (LoFTR) module."""
 
-    def __init__(self, d_model, nhead, layer_names, attention_type):
-        super(LocalFeatureTransformer, self).__init__()
+    def __init__(self, d_model, layer_names, attention_type):
+        super().__init__()
 
-        # self.config = config
         self.d_model = d_model
-        self.nhead = nhead
         self.layer_names = layer_names
-        # encoder_layer = LoFTREncoderLayer(d_model, nhead, attention_type)
-        # self.layers = nn.ModuleList([copy.deepcopy(encoder_layer) for _ in range(len(self.layer_names))])
         self.layers = nn.ModuleList(
             [
-                LoFTREncoderLayer(d_model, nhead, attention_type)
+                LoFTREncoderLayer(d_model, attention_type)
                 for _ in self.layer_names
             ]
         )
@@ -243,7 +248,15 @@ class LocalFeatureTransformer(nn.Module):
         return feat0, feat1
 
 
+# ====
+# Backbone
+# ====
+
+
 class Block(torch.nn.Module):
+    """
+    A block of convolutional layers with optional downsampling and residual connections.
+    """
     def __init__(self, in_type, out_type, down=False, double=False):
         super().__init__()
         self.frame = e2nn.SequentialModule(
@@ -281,6 +294,9 @@ class Block(torch.nn.Module):
             self.down = None
 
     def forward(self, x):
+        """
+        Convolution, skip connection, optional downsampling and then element-wise addition.
+        """
         x1 = self.frame(x)
         x0 = self.link(x) if self.link is not None else x
         if self.down is not None:
@@ -288,14 +304,17 @@ class Block(torch.nn.Module):
         return x1 + x0
 
 
-class Feature_Extraction(torch.nn.Module):
-
+class FeatureExtraction(torch.nn.Module):
+    """
+    We use e2cnn for rotational equivariance - the network maintains
+    the same output irrespective of the input rotation, which is what we need for registration.
+    """
     def __init__(
         self,
         in_channel,
         hidden_channel=64,
         n_rotation=4,
-        bone_kernel=[False, False],
+        bone_kernel=(False, False),
         num_layers=3,
         up_progress=True,
     ):
@@ -325,6 +344,7 @@ class Feature_Extraction(torch.nn.Module):
 
         self.bottleneck = e2nn.R2Conv(out_type, out_type, 1)
 
+        # irrep(1) extracts rotation-equivariant features
         d3_vector_out_type = e2nn.FieldType(
             self.r2_act,
             hidden_channel * (2 ** (num_layers - 1)) * [self.r2_act.irrep(1)],
@@ -355,8 +375,11 @@ class Feature_Extraction(torch.nn.Module):
             self.layer1_out = e2nn.R2Conv(out_type, d1_regular_out_type, 1)
             self.gpool = e2nn.GroupPooling(d1_regular_out_type)
 
-    def forward(self, input):
-        x = e2nn.GeometricTensor(input, self.in_type)
+    def forward(self, input_):
+        """
+        Forward pass through the feature extraction network.
+        """
+        x = e2nn.GeometricTensor(input_, self.in_type)
 
         x = self.layer0(x)
 
@@ -364,7 +387,6 @@ class Feature_Extraction(torch.nn.Module):
         for _layer in self.down_layers:
             x = _layer(x)
             down_list.append(x)
-            # print(x.shape)
 
         x = self.bottleneck(x)
 
@@ -379,13 +401,12 @@ class Feature_Extraction(torch.nn.Module):
                 x = _up(x)
                 x = x + _x
                 x = _layer(x)
-                # print(x.shape)
 
             d1_out = self.gpool(self.layer1_out(x))
 
             feature_out1 = rearrange(
                 d1_out.tensor, "b c (d1 h) (d2 w) -> b (d1 d2) c h w", d1=4, d2=4
-            )  # 2 * (nume_layers -1) or 4
+            )
 
         feature = (
             torch.cat([feature_out3, feature_out1], dim=1)
@@ -396,7 +417,15 @@ class Feature_Extraction(torch.nn.Module):
         return feature
 
 
+# ====
+# The main image registration model
+# ====
 class ImageRegistration(nn.Module):
+    """
+    Transformer-based class for image registration.
+
+    """
+
     def __init__(self, config):
         super().__init__()
 
@@ -404,11 +433,10 @@ class ImageRegistration(nn.Module):
             config["Backbone"]["hidden_channel"] // config["Backbone"]["n_rotation"]
         )
 
-        self.backbone = Feature_Extraction(**config["Backbone"])
+        self.backbone = FeatureExtraction(**config["Backbone"])
 
         self.pos_encoding = PositionEncodingSine(
             d_model=hidden_channel,
-            # **config["max_shape"]
             max_shape=(256, 256),
         )
 
@@ -435,6 +463,10 @@ class ImageRegistration(nn.Module):
         )
 
     def forward(self, data_dict):
+        """
+        Compute correlation between feature spaces to establish
+        correspondences between the two images.
+        """
         image_init = data_dict["Template_image"]
         image_term = data_dict["Target_image"]
 
@@ -459,10 +491,11 @@ class ImageRegistration(nn.Module):
             feat_init, feat_term, mask_init, mask_term
         )
 
-        Ch = feat_init.shape[-1]
+        n_channels = feat_init.shape[-1]
 
-        feat_init = feat_init.div(Ch**0.5)
-        feat_term = feat_term.div(Ch**0.5)
+        # Scaling by sqrt(n channels) stabilises gradients during training
+        feat_init = feat_init.div(n_channels**0.5)
+        feat_term = feat_term.div(n_channels**0.5)
 
         matching_map = torch.einsum("nlec, nsec -> nlse", feat_init, feat_term)
 
@@ -486,7 +519,7 @@ class ImageRegistration(nn.Module):
             )  # shape: (Bs L S)
 
         angle_map = F.normalize(matching_map[..., 1:3], dim=-1)
-        scale_map = matching_map[..., 3:4]  # if matching_map.size(-1) == 6 else None
+        scale_map = matching_map[..., 3:4]
         trans_map = matching_map[..., -2:]
 
         return {
@@ -497,6 +530,12 @@ class ImageRegistration(nn.Module):
         }
 
     def log_optimal_transport(self, scores, alpha, iters=3):
+        """
+        Sinkhorn algorithm for differentiable optimal transport.
+
+        This finds the best coupling between two distributions which is more
+        robust than greedy matching.
+        """
         b, m, n = scores.shape
         one = scores.new_tensor(1)
         ms, ns = (m * one).to(scores), (n * one).to(scores)
@@ -514,13 +553,16 @@ class ImageRegistration(nn.Module):
         log_nu = torch.cat([norm.expand(n), ms.log()[None] + norm])
         log_mu, log_nu = log_mu[None].expand(b, -1), log_nu[None].expand(b, -1)
 
-        Z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
-        Z = Z - norm  # multiply probabilities by M+N
-        return Z.exp()
+        z = self.log_sinkhorn_iterations(couplings, log_mu, log_nu, iters)
+        z = z - norm  # multiply probabilities by M+N
+        return z.exp()
 
-    def log_sinkhorn_iterations(self, Z, log_mu, log_nu, iters):
+    def log_sinkhorn_iterations(self, z, log_mu, log_nu, iters):
+        """
+        Sinkhorn iterations for the log domain
+        """
         u, v = torch.zeros_like(log_mu), torch.zeros_like(log_nu)
         for _ in range(iters):
-            u = log_mu - torch.logsumexp(Z + v.unsqueeze(1), dim=2)
-            v = log_nu - torch.logsumexp(Z + u.unsqueeze(2), dim=1)
-        return Z + u.unsqueeze(2) + v.unsqueeze(1)
+            u = log_mu - torch.logsumexp(z + v.unsqueeze(1), dim=2)
+            v = log_nu - torch.logsumexp(z + u.unsqueeze(2), dim=1)
+        return z + u.unsqueeze(2) + v.unsqueeze(1)
