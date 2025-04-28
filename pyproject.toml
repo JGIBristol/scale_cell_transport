@@ -1,0 +1,25 @@
+[project]
+name = "scale-cell-transport"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Richard Lane", email = "richard.lane@bristol.ac.uk" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "black>=25.1.0",
+    "e2cnn==0.2.2",
+    "einops==0.6.0",
+    "ipykernel>=6.29.5",
+    "matplotlib>=3.9.4",
+    "numpy>=2.0.2",
+    "pillow>=11.2.1",
+    "pyyaml>=6.0.2",
+    "torch>=2.7.0",
+    "torchvision>=0.22.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
