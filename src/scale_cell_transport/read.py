@@ -4,6 +4,8 @@ Read stuff from places
 
 import re
 import pathlib
+import concurrent.futures
+from functools import partial
 from collections import defaultdict
 
 import tifffile
@@ -48,11 +50,11 @@ def _group_file_names(
     return video_files
 
 
-def phase_videos() -> dict[str, np.ndarray]:
+def phase_videos() -> dict[str, tuple[np.ndarray, list[str]]]:
     """
     Get the greyscale phase contrast videos as a list of numpy arrays
 
-    :returns: a dict mapping the video name to the video
+    :returns: a dict mapping the video name to the video and timestamp of each frame
 
     """
     img_dir = files.incucyte_phase_imgs_dir()
@@ -60,15 +62,25 @@ def phase_videos() -> dict[str, np.ndarray]:
     grouped_paths = _group_file_names(_tif_paths(img_dir))
 
     videos = {}
+
+    def read_tif(path: pathlib.Path) -> np.ndarray:
+        """
+        Read a tif file and return it as a numpy array
+        """
+        return tifffile.imread(path)
+
     for video_name, file_data in tqdm(
         grouped_paths.items(), desc=f"Loading videos from {img_dir.name}"
     ):
-        path, time = zip(*file_data)
+        paths, times = zip(*file_data)
 
-        frames = [tifffile.imread(p) for p in path]
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Read the tif files in parallel
+            frames = list(executor.map(read_tif, paths))
 
         if frames:
-            # Stack the frames into a 3D array
-            videos[video_name] = np.stack(frames, axis=0)
+            videos[video_name] = (np.stack(frames, axis=0), times)
+        else:
+            raise ValueError(f"No frames found for video {video_name}")
 
     return videos
