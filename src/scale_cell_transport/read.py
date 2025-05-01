@@ -8,11 +8,41 @@ import concurrent.futures
 from functools import partial
 from collections import defaultdict
 
+import cv2
 import tifffile
 import numpy as np
 from tqdm import tqdm
 
 from . import files
+
+
+def read_mp4s_from_dir(video_dir: pathlib.Path) -> list[np.ndarray]:
+    """
+    Read mp4 videos from a directory and return them as numpy arrays
+    """
+
+    arrays = []
+    for path in tqdm(
+        list(video_dir.glob("*.mp4")), desc=f"Loading videos from {video_dir.name}"
+    ):
+        cap = cv2.VideoCapture(str(path))
+        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        buffer = np.empty((n_frames, height, width, 3), dtype=np.uint8)
+
+        fc = 0
+        ret = True
+
+        while fc < n_frames and ret:
+            ret, buffer[fc] = cap.read()
+            fc += 1
+
+        # Convert BGR to RGB
+        arrays.append(buffer[:, :, :, ::-1])
+        cap.release()
 
 
 def _tif_paths(img_dir: pathlib.Path) -> list[str]:
