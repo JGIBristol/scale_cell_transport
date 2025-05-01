@@ -8,6 +8,7 @@ from collections import defaultdict
 
 import tifffile
 import numpy as np
+from tqdm import tqdm
 
 from . import files
 
@@ -54,9 +55,20 @@ def phase_videos() -> dict[str, np.ndarray]:
     :returns: a dict mapping the video name to the video
 
     """
-    img_dir = _tif_paths(files.incucyte_phase_imgs_dir())
+    img_dir = files.incucyte_phase_imgs_dir()
 
-    grouped_paths = _group_file_names(img_dir)
+    grouped_paths = _group_file_names(_tif_paths(img_dir))
 
-    for k, v in grouped_paths.items():
-        print(k, [(x.name, t) for (x, t) in v])
+    videos = {}
+    for video_name, file_data in tqdm(
+        grouped_paths.items(), desc=f"Loading videos from {img_dir.name}"
+    ):
+        path, time = zip(*file_data)
+
+        frames = [tifffile.imread(p) for p in path]
+
+        if frames:
+            # Stack the frames into a 3D array
+            videos[video_name] = np.stack(frames, axis=0)
+
+    return videos

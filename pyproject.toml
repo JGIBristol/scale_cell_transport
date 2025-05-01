@@ -11,6 +11,7 @@ dependencies = [
     "black>=25.1.0",
     "e2cnn==0.2.2",
     "einops==0.6.0",
+    "imagecodecs>=2024.12.30",
     "ipykernel>=6.29.5",
     "ipywidgets>=8.1.6",
     "jupyter>=1.1.1",
