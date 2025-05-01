@@ -15,6 +15,7 @@ dependencies = [
     "ipywidgets>=8.1.6",
     "jupyter>=1.1.1",
     "matplotlib>=3.9.4",
+    "mudic>=0.2.1",
     "numpy==1.26.0",
     "opencv-python>=4.11.0.86",
     "pillow>=11.2.1",
