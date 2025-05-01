@@ -24,18 +24,25 @@ def _tif_paths(img_dir: pathlib.Path) -> list[str]:
     return sorted(img_dir.glob("*.tif"))
 
 
-def _group_file_names(file_paths: list[str]) -> dict[str, list[str]]:
+def _group_file_names(
+    file_paths: list[pathlib.Path],
+) -> dict[str, list[tuple[pathlib.Path, str]]]:
     """
     Get a dict mapping the video name to the list of file paths
     """
+    # defaultdict so that we don't need to check for existence every time
     video_files = defaultdict(list)
-    pattern = re.compile(r"(.+?)_\d+h\d+m\.tif$")
+
+    # Extract video name and the time
+    pattern = re.compile(r"(.*?)_((?:\d+y\d+m\d+d)_\d+h\d+m)\.tif$")
 
     for file_path in file_paths:
         match = pattern.match(file_path.name)
         if match:
             name = match.group(1)
-            video_files[name].append(file_path)
+            timestamp = match.group(2)
+
+            video_files[name].append((file_path, timestamp))
 
     return video_files
 
@@ -49,4 +56,7 @@ def phase_videos() -> dict[str, np.ndarray]:
     """
     img_dir = _tif_paths(files.incucyte_phase_imgs_dir())
 
-    grouped_paths: dict[str, list[str]] = _group_file_names(img_dir)
+    grouped_paths = _group_file_names(img_dir)
+
+    for k, v in grouped_paths.items():
+        print(k, [(x.name, t) for (x, t) in v])
