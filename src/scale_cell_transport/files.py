@@ -42,3 +42,16 @@ def incucyte_video_dir_1() -> pathlib.Path:
 
     """
     return rdsf_path() / "Jérémie" / "Scale Culture" / "video Incucyte for Rich"
+
+
+def incucyte_phase_imgs_dir() -> pathlib.Path:
+    """
+    Path to directory containing some scale videos
+
+    This lives on the RDSF, so it needs to be mounted and the mount location
+    specified in the config file.
+
+    """
+    return (
+        rdsf_path() / "Jérémie" / "Scale Culture" / "video Incucyte_37C_Phase_ for Rich"
+    )
